@@ -1,5 +1,18 @@
 import simpy
 import random
+from enum import enum
+
+class Camperform(Enum):
+    TENT = 1
+    TENT_CAR = 2
+    CARAVAN = 3
+
+class Camper(object):
+    def __init(self, form, size, duration):
+        self.form = form
+        self.size = size
+        self.duration = duration
+
 
 class Campsite(object):
     def __init__(self, env):
@@ -14,6 +27,18 @@ class Campsite(object):
         self.people = simpy.Container(self.env, init=0, capacity=)
 
         self.action = env.process(self.run())
+
+    def check_in(self, camper):
+
+
+    def camp(self, camper):
+        """The camping processes. It takes a ``camper`` processes and lets it
+        stay at the campsite."""
+        # TODO payment
+
+        yield self.env.timeout(camper.duration)
+        print("%s stayed %d days until %d." %
+              (camper, camper.duration, env.now))
 
      def run(self):
         while True:
@@ -38,47 +63,64 @@ def arrival(env, campsite):
         num_groups = 
 
         # create new arriving groups
-        groups = [env.process(camper(env, campsite)) for i in range(num_groups))]
+        groups = [env.process(camper(env, i, campsite)) for i in range(num_groups))]
         # go to next day
         yield env.timeout(1)
 
-def camper(env, campsite, rng):
-    # choose type of camper
-    camper_type = 
+def camper(env, name, campsite, rng):
+    # choose form of camper
+    camper_form = 
 
     place = None
-    if type == tent:
+    if form is Camperform.TENT or form is Camperform.TENT_CAR:
         place = campsite.tent_meadow
-    elif type == caravan:
+    elif form is Camperform.CARAVAN:
         place = campsite.caravan_lots
+    else:
+        # TODO unknown form
 
     # if tent: 1. try to occupy tent meadow
     #          2. or else try to occupy caravan lot
 
-    with place.request as req():
+    print('%s arrives at %.2f.' % (name, env.now))
+    with place.request as request():
 
         # try to enter campsite
         # TODO: abort if campsite is full
-        yield req | env.timeout(0)
+        entered = yield request # | env.timeout(0)
+        print('%s enters at %.2f.' % (name, env.now))
 
-        # choose duration of stay
-        duration = 
+        # check if aborted
+        if request in entered:
 
-        # choose number of persons
-        # TODO abort if overall person limit is reached
-        # check all people in
-        yield campsite.people.get(number_people)
+            # choose duration of stay
+            duration = 
 
-        # calculate price
+            # choose number of persons
+            # TODO abort if overall person limit is reached
+            # check all people in
+            checked_in = yield campsite.people.put(number_people) | env.timeout(0)
+            if in checked_in:
+                pass
+            else:
+                pass
 
-        # pay
+            # calculate price
 
-        # occupy place on campsite during the duration of stay
-        yield event.timeout(duration)
+            # pay
 
-        # check people out
-        yield campsite.people.put(number_people)
+            # occupy place on campsite during the duration of stay
+            yield event.timeout(duration)
+
+            # check people out
+            yield campsite.people.get(number_people)
+            
+        else:
+            # campsite is full
+            # TODO add rejection to statistics
+
         # leave campsite automatically via python context manager
+
 
 def resource_user(env, resource):
     with resource.request() as req:  # Generate a request event
