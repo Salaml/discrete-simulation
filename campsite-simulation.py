@@ -1,12 +1,13 @@
 print('loading libraries...')
 import simpy
 import random
+from math import exp, sqrt, pi
 from enum import enum
 import itertools
 
 def normal_dist(x , mean , sd, scale=None):
     # if scale is set: discard normalization and set maximum value to value of scale
-    return np.exp(-0.5 * ((x - mean) / sd)**2) * (1 / (sd * np.sqrt(2 * np.pi)) if scale is None else scale)
+    return exp(-0.5 * ((x - mean) / sd)**2) * (1 / (sd * sqrt(2 * pi)) if scale is None else scale)
 
 def norm_list(l):
     # normalize list of absolute frequencies to relative frequencies
@@ -36,23 +37,21 @@ class Camper(object):
 
 
 class Campsite(object):
-    def __init__(self, env, size_meadow, num_lots, limit_people,
-            prices_form, price_person):
+    def __init__(self, env, prices, costs, sizes):
         # simulation environment
         self.env = env
         
         # meadow where campers with tent will stay
-        self.tent_meadow = simpy.Resource(self.env, capacity=size_meadow)
+        self.tent_meadow = simpy.Resource(self.env, capacity=sizes.size_meadow)
         # lots where campers with caravan will stay, usable by tents if tent meadow is full
-        self.caravan_lots = simpy.Resource(self.env, capacity=num_lots)
+        self.caravan_lots = simpy.Resource(self.env, capacity=sizes.num_lots)
 
         # limited number of people due to corona regulations
-        self.people = simpy.Container(self.env, init=0, capacity=limit_people)
+        self.people = simpy.Container(self.env, init=0, capacity=sizes.limit_people)
 
-        # daily base price depending on form of camper
-        self.prices_form = prices_form
-        # daily price per person
-        self.price_person = price_person
+        # daily prices and costs
+        self.prices = prices
+        self.costs = costs
 
     def check_in(self, camper):
 
@@ -69,20 +68,17 @@ class Campsite(object):
 def setup(env, settings):
     """Creates a campsite. Creates new arriving campers on every new day
     and let them try to check in to the campsite."""
-    # settings
-    # TODO
-    size_meadow = 20
-    num_lots = 50
-    limit_people = simpy.core.Infinity
-
     # create new empty campsite
-    campsite = Campsite(env, size_meadow, num_lots, limit_people, 
-            prices_form, price_person)
+    campsite = Campsite(env, settings.prices, settings.costs, settings.sizes)
 
     # new campers arrive every day
-    for day in itertools.count():
-        # choose number of new campers for this day
-        num_campers = 
+    while True:
+        day = env.now % 360
+
+        # choose random number of new campers for this day, independent of day in year
+        num_campers = random.normalvariate(settings.dists.day_mean, settings.dists.day_sd)
+        # apply multiplicator specific to day in year, round to integer numbers, clip to minimum value 0
+        num_campers = maximum(round(settings.dists.year[day] * num_campers), 0)
 
         for i in range(num_campers):
             # create new arriving campers, they try to check in on camp site
@@ -91,7 +87,7 @@ def setup(env, settings):
         # wait for next day
         yield env.timeout(1)
 
-def camper(env, name, campsite, rng=None):
+def camper(env, name, campsite, settings):
     # choose form of camper
     form = 
 
@@ -157,51 +153,64 @@ def print_stats(res):
     print(f'  Queued events: {res.queue}')
 
 
-class Settings(object):
+class Distributions(object):
     # parameters for normal distribution of number of new camper groups per day
-    dist_day_mean = 12
-    dist_day_sd = 4
-
+    day_mean = 12
+    day_sd = 4
     # multiplicator for demand in course of the year
     # normal distribution with maximum at mean scaled to 1
     # (0 = begin of january, 11 = begin of december)
-    dist_year_mean = 7.0 # maximum at end of july / begin of august
-    dist_year_sd = 2.5
-
+    year_mean = 7.0 # maximum at end of july / begin of august
+    year_sd = 2.5
     # distribution of camping forms, absolute frequencies
-    dist_form = {Camperform.TENT: 1, Camperform.TENT_CAR: 3, Camperform.CARAVAN: 6}
-
+    form = {1: 1, 2: 3, 3: 6}
     # distribution of duration of stay in nights, 14 nights at max, absolute frequencies
-    dist_duration = [5, 5, 6, 7, 9, 8, 10, 6, 4, 3, 1, 1, 1, 2]
+    duration = [5, 5, 6, 7, 9, 8, 10, 6, 4, 3, 1, 1, 1, 2]
     # distribution of number of people per group, 4 people at max, absolute frequencies
-    dist_person = [1, 5, 2, 4]
+    person = [1, 5, 2, 4]
+    # do not edit, gets filled later with multiplicator for each day of year
+    year = []
 
+class Prices(object):
     # daily price per person
-    price_person = 5
+    person = 5
     # daily base price for a group depending on form of camper
-    prices_form = {Camperform.TENT: 5, Camperform.TENT_CAR: 9, Camperform.CARAVAN: 15}
+    form = {Camperform.TENT: 5, Camperform.TENT_CAR: 9, Camperform.CARAVAN: 15}
 
-    # daily costs per person (e. g. waste, water)
-    costs_person = -2
+class Costs(object):
+    # daily costs per person (e. g. electricity, water)
+    person = -2
     # daily fixed costs (e. g. land tax, wages)
-    costs_daily = -350
+    daily = -350
 
+class Sizes(object):
+    # number of places of tent meadow, tent = 1 place, tent + car = 2 places
+    size_meadow = 20
+    # number of lots for caravans
+    num_lots = 50
+    # limited number of people for whole campsite due to corona regulations
+    limit_people = simpy.core.Infinity # infinity = no limit
 
-
-    dist_year = [] # gets filled later with multiplicator for each day of year
-
+class Settings(object):
+    dists = Distributions
+    prices = Prices
+    costs = Costs
+    sizes = Sizes
 
 if __name__ == '__main__':
 
+    # make simulation reproducible if not None
+    random.seed(42)
+
+    # calculate multiplicator for each day of year (360 days = 12 month * 30 days per month)
+    Settings.distributions.year = [normal_dist(day / 30, self.year_mean, self.year_sd, 1) for day in range(12 * 30)]
+
     for i in num_experiments:
         env = simpy.Environment()
-        # let the simulation tune in?
+        env.process(setup(env, Settings))
 
-        # create arrival process which creates new arriving campers every day
-        arriv = env.process(arrival(env))
-
-        env.run(until=360) # simulate one year (with 12 month with 30 days each)
+        env.run(until=360) # simulate one year with 360 days (12 month * 30 days per month)
 
         # add statistics to overall statistics
 
-    # calculate mean and stdev over all experiments
+    # calculate mean and stdev of results over all experiments
