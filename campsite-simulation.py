@@ -4,9 +4,6 @@ import random
 from math import exp, sqrt, pi
 from enum import Enum
 
-# TODO remove
-from time import perf_counter
-
 
 def normal_dist(x , mean , sd, scale=None):
     # if scale is set: discard normalization and set maximum value to value of scale
@@ -24,6 +21,13 @@ def accumulate_dict(d):
     return values, cum_weights
 
 
+def print_msg(time, *args, **kwargs):
+    print(f"{time:.1f}:", *args, **kwargs)
+
+
+class Statistics():
+    
+
 class Camperform(Enum):
     # just a tent
     TENT = 0
@@ -33,14 +37,14 @@ class Camperform(Enum):
     CARAVAN = 2
 
 
-class Camper(object):
-    def __init(self, form, size, duration):
-        # form of this camper, one of Camperform
-        self.form = form
-        # number of people
-        self.size = size
-        # duration of stay on campsite
-        self.duration = duration
+# class Camper(object):
+#     def __init(self, form, size, duration):
+#         # form of this camper, one of Camperform
+#         self.form = form
+#         # number of people
+#         self.size = size
+#         # duration of stay on campsite
+#         self.duration = duration
 
 
 class Campsite(object):
@@ -88,23 +92,30 @@ def setup(env, settings):
         # apply multiplicator specific to day in year, round to integer numbers, clip to minimum value 0
         num_groups = max(round(settings.groups.year[day] * num_groups), 0)
 
+        # choose random form for every group
+        forms = random.choices(settings.campers.form_val, cum_weights=settings.campers.form_wght, k=num_groups)
+
+        # choose random duration of stay for every group
+        durations = random.choices(settings.campers.duration_val, cum_weights=settings.campers.duration_wght, k=num_groups)
+
+        # choose random number of people for every group
+        num_people = random.choices(settings.campers.people_val, cum_weights=settings.campers.people_wght, k=num_groups)
+
         for i in range(num_groups):
             # create new arriving campers, they try to check in on camp site
-            env.process(new_camper(env, str(day) + '-' + str(i), campsite, settings.campers))
+            env.process(new_camper(env, str(day) + '-' + str(i), campsite, forms[i], num_people[i], durations[i]))
 
         # proceed to next day
         yield env.timeout(1)
 
 
-def new_camper(env, name, campsite, dists):
-    # choose form of camper
-    form = random.choices(dists.form_val, cum_weights=dists.form_wght)[0]
+def new_camper(env, name, campsite, form, num_people, duration):
 
     places = []
     if form is Camperform.TENT or form is Camperform.TENT_CAR:
         # tents belong firstly to the tent meadow
         places.append(campsite.tent_meadow)
-        # usage of caravon lot is possible if tent meadow is full
+        # usage of caravan lot is possible if tent meadow is full
         places.append(campsite.caravan_lots)
     elif form is Camperform.CARAVAN:
         # caravans belong always to the caravan lots
@@ -113,7 +124,7 @@ def new_camper(env, name, campsite, dists):
     for place in places:
         place_available = False
 
-        #print('%.1f %s arrive' % (env.now, name))
+        print_msg(env.now, name, "arrive")
         with place.request() as request:
 
             # try to enter campsite
@@ -124,23 +135,14 @@ def new_camper(env, name, campsite, dists):
             if request in entered:
                 place_available = True
 
-                # choose duration of stay
-                duration = random.choices(dists.duration_val, cum_weights=dists.duration_wght)[0]
-                # check out before 11:30, check in after 14:00,  => remove 2,5h time difference from duration
-                duration -= 0.1
-                # choose number of people
-                num_people = random.choices(dists.people_val, cum_weights=dists.people_wght)[0]
-
-                print('%.1f %s entered, %d people %d nights' %
-                        (env.now, name, num_people, duration))
+                print_msg(env.now, name, f"entered, {num_people} people {duration} nights")
 
                 # TODO abort if overall people limit is reached
                 # check all people in
                 check_in = campsite.people.put(num_people)
                 checked_in = yield check_in | env.timeout(0)
                 if check_in in checked_in: # TODO
-                    print('%.1f %s checked in, %d people on site' %
-                            (env.now, name, campsite.people.level))
+                    print_msg(env.now, name, f"checked in, {campsite.people.level} people on site")
                     
                     # calculate price
                     # pay
@@ -150,17 +152,15 @@ def new_camper(env, name, campsite, dists):
 
                     # check people out
                     yield campsite.people.get(num_people)
-                    print('%.1f %s checked out %d people, %d people on site' %
-                            (env.now, name, num_people, campsite.people.level))
+                    print_msg(env.now, name, f"checked out {num_people} people, {campsite.people.level} people on site")
                 else:
-                    print('%.1f %s people limit %d reached, %d rejected' %
-                            (env.now, name, campsite.people.level, num_people))
+                    print_msg(env.now, name, f"rejected {num_people} people, {campsite.people.level} people on site, people limit reached")
                     pass
 
             else:
                 # campsite is full
                 # TODO add rejection to statistics
-                print('%.1f %s rejected on %s' % (env.now, name, place))
+                print_msg(env.now, name, f"rejected for place {place}")
                 pass
 
             # leave campsite automatically via python context manager
@@ -189,9 +189,6 @@ class DistGroups(object):
     # (0 = begin of january, 11 = begin of december)
     year_mean = 7.0 # maximum at end of july / begin of august
     year_sd = 2.5
-
-    # do not edit, gets filled later with multiplicator for each day of year
-    year = []
 
 
 class DistCampers(object):
@@ -226,7 +223,7 @@ class Sizes(object):
     num_lots = 50
 
     # limited number of people for whole campsite due to corona regulations
-    limit_people = simpy.core.Infinity # infinity = no limit
+    limit_people = 10#simpy.core.Infinity # infinity = no limit
 
 
 class Settings(object):
@@ -253,17 +250,15 @@ if __name__ == '__main__':
     Settings.campers.duration_val, Settings.campers.duration_wght = accumulate_dict(Settings.campers.duration)
     Settings.campers.people_val, Settings.campers.people_wght = accumulate_dict(Settings.campers.people)
 
-    t0 = perf_counter()
+    # check out before 11:30, check in after 14:00,  => remove 2,5h time difference from duration
+    Settings.campers.duration_val = [duration - 0.1 for duration in Settings.campers.duration_val]
 
     for i in range(num_experiments):
         env = simpy.Environment()
         startup = env.process(setup(env, Settings))
 
-        env.run(until=360) # simulate one year with 360 days (12 month * 30 days per month)
+        env.run(until=23) # simulate one year with 360 days (12 month * 30 days per month)
 
         # add statistics to overall statistics
 
     # calculate mean and stdev of results over all experiments
-
-    diff = perf_counter() - t0
-    print(diff, diff / num_experiments)
