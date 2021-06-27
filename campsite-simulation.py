@@ -2,17 +2,12 @@ print('loading libraries...')
 import simpy
 import random
 from math import exp, sqrt, pi
-from enum import enum
+from enum import Enum
 
 
 def normal_dist(x , mean , sd, scale=None):
     # if scale is set: discard normalization and set maximum value to value of scale
     return exp(-0.5 * ((x - mean) / sd)**2) * (1 / (sd * sqrt(2 * pi)) if scale is None else scale)
-
-
-def accumulate_list(l):
-    # takes a list with weights and returns the cumulative weights
-    return [sum(l[ : i+1]) for i in range(len(l))]
 
 
 def accumulate_dict(d):
@@ -88,11 +83,11 @@ def setup(env, settings):
         # choose random number of new groups for this day, independent of day in year
         num_groups = random.normalvariate(settings.groups.day_mean, settings.groups.day_sd)
         # apply multiplicator specific to day in year, round to integer numbers, clip to minimum value 0
-        num_groups = maximum(round(settings.groups.year[day] * num_groups), 0)
+        num_groups = max(round(settings.groups.year[day] * num_groups), 0)
 
         for i in range(num_groups):
             # create new arriving campers, they try to check in on camp site
-            env.process(camper(env, str(day) + '-' + str(i), campsite, settings.campers))
+            env.process(new_camper(env, str(day) + '-' + str(i), campsite, settings.campers))
 
         # proceed to next day
         yield env.timeout(1)
@@ -100,58 +95,73 @@ def setup(env, settings):
 
 def new_camper(env, name, campsite, dists):
     # choose form of camper
-    form = random.choices(dists.form_val, cum_weights=dists.form_wght)
+    form = random.choices(dists.form_val, cum_weights=dists.form_wght)[0]
 
-    place = None
+    places = []
     if form is Camperform.TENT or form is Camperform.TENT_CAR:
-        place = campsite.tent_meadow
+        # tents belong firstly to the tent meadow
+        places.append(campsite.tent_meadow)
+        # usage of caravon lot is possible if tent meadow is full
+        places.append(campsite.caravan_lots)
     elif form is Camperform.CARAVAN:
-        place = campsite.caravan_lots
+        # caravans belong always to the caravan lots
+        places.append(campsite.caravan_lots)
     else:
         # TODO unknown form
+        pass
+        print('unknown place', form)
 
-    # if tent: 1. try to occupy tent meadow
-    #          2. or else try to occupy caravan lot
+    for place in places:
+        place_available = False
 
-    print('%s arrives at %.2f.' % (name, env.now))
-    with place.request as request():
+        #print('%s arrives at %.2f.' % (name, env.now))
+        with place.request() as request:
 
-        # try to enter campsite
-        # TODO: abort if campsite is full
-        entered = yield request | env.timeout(0)
-        print('%s enters at %.2f.' % (name, env.now))
+            # try to enter campsite
+            # TODO: abort if campsite is full
+            entered = yield request | env.timeout(0)
+            #print('%s enters at %.2f.' % (name, env.now))
 
-        # check if aborted
-        if request in entered:
+            # check if aborted
+            if request in entered:
+                place_available = True
 
-            # choose duration of stay
-            duration = random.choices(dists.duration_val, cum_weights=dists.duration_wght)
+                # choose duration of stay
+                duration = random.choices(dists.duration_val, cum_weights=dists.duration_wght)[0]
 
-            # choose number of people
-            people = random.choices(dists.people_val, cum_weights=dists.people_wght)
-            # TODO abort if overall people limit is reached
-            # check all people in
-            checked_in = yield campsite.people.put(number_people) | env.timeout(0)
-            if in checked_in:
-                pass
+                # choose number of people
+                num_people = random.choices(dists.people_val, cum_weights=dists.people_wght)[0]
+
+                # TODO abort if overall people limit is reached
+                # check all people in
+                checked_in = yield campsite.people.put(num_people) | env.timeout(0)
+                if checked_in: # TODO
+                    pass
+                else:
+                    pass
+
+                # calculate price
+
+                # pay
+
+                # occupy place on campsite during the duration of stay
+                yield env.timeout(duration)
+
+                # check people out
+                yield campsite.people.get(num_people)
+                
             else:
+                # campsite is full
+                # TODO add rejection to statistics
                 pass
 
-            # calculate price
+            # leave campsite automatically via python context manager
 
-            # pay
-
-            # occupy place on campsite during the duration of stay
-            yield event.timeout(duration)
-
-            # check people out
-            yield campsite.people.get(number_people)
-            
+        if place_available:
+            # place is available, no further looping over other places required
+            break
         else:
-            # campsite is full
-            # TODO add rejection to statistics
-
-        # leave campsite automatically via python context manager
+            print("%s rejected at %f" % (name, env.now))
 
 
 def resource_user(env, resource):
@@ -239,6 +249,8 @@ if __name__ == '__main__':
     # make simulation reproducible if not None
     random.seed(42)
 
+    num_experiments = 1
+
     # calculate multiplicator for each day of year (360 days = 12 month * 30 days per month)
     Settings.groups.year = [normal_dist(day / 30, Settings.groups.year_mean, Settings.groups.year_sd, 1) for day in range(12 * 30)]
 
@@ -247,9 +259,9 @@ if __name__ == '__main__':
     Settings.campers.duration_val, Settings.campers.duration_wght = accumulate_dict(Settings.campers.duration)
     Settings.campers.people_val, Settings.campers.people_wght = accumulate_dict(Settings.campers.people)
 
-    for i in num_experiments:
+    for i in range(num_experiments):
         env = simpy.Environment()
-        env.process(setup(env, Settings))
+        startup = env.process(setup(env, Settings))
 
         env.run(until=360) # simulate one year with 360 days (12 month * 30 days per month)
 
