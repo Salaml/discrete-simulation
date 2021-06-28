@@ -78,8 +78,6 @@ def setup(env, settings, statistics):
 
     print_msg(env.now, "start simulation")
 
-    camper_list = []
-
     # new groups arrive every day
     while True:
         day = env.now % 360
@@ -103,9 +101,7 @@ def setup(env, settings, statistics):
 
         for i in range(num_groups):
             # create new arriving campers, they try to check in on camp site
-            new_camper = env.process(camper(env, str(day) + '-' + str(i), campsite, 
-                    forms[i:i+1][0], num_people[i:i+1][0], durations[i:i+1][0], statistics))
-            camper_list.append(new_camper)
+            env.process(camper(env, str(day) + '-' + str(i), campsite, forms[i], num_people[i], durations[i], statistics))
 
         # proceed to next day
         yield env.timeout(1)
@@ -121,6 +117,8 @@ def camper(env, name, campsite, form, num_people, duration, statistics):
     check_in = campsite.people.put(num_people)
     checked_in = yield check_in | env.timeout(0)
     if check_in not in checked_in:
+        # check in not successful, group goes to another campsite -> cancel pending request
+        check_in.cancel()
         print_msg(env.now, name, f"reject {num_people} people, limit reached ({campsite.people.level}/{campsite.people.capacity})")
         # TODO add to statistics
     else:
@@ -140,11 +138,12 @@ def camper(env, name, campsite, form, num_people, duration, statistics):
         # abort instantly if no place available via timeout(0)
         place_available = yield request_place | env.timeout(0)
         if request_place not in place_available:
-            # campsite is full
+            # campsite is full, group goes to another campsite -> cancel pending request
+            request_place.cancel()
             # TODO add rejection to statistics
             print_msg(env.now, name, f"reject {form}, no place available")
         else:
-            print_msg(env.now, name, f"check in {form}, {num_people} people, {duration} nights ({campsite.people.level}/{campsite.people.capacity})")
+            print_msg(env.now, name, f"check in {form}, {num_people} people, {duration} nights")
 
             # calculate price
             # pay
@@ -162,12 +161,10 @@ def camper(env, name, campsite, form, num_people, duration, statistics):
             elif form is Camperform.CARAVAN:
                 yield campsite.caravan_lots.get(1)
 
-            print_msg(env.now, name, f"check out ({campsite.people.level}/{campsite.people.capacity})")
+            print_msg(env.now, name, f"check out")
 
         # check people out
         yield campsite.people.get(num_people)
-        print_msg(env.now, name, f"check out ({campsite.people.level}/{campsite.people.capacity})")
-
 
 
 def print_stats(res):
@@ -258,7 +255,7 @@ if __name__ == '__main__':
         env = simpy.Environment()
         startup = env.process(setup(env, Settings, statistic))
 
-        env.run(until=30) # simulate one year with 360 days (12 month * 30 days per month)
+        env.run(until=360) # simulate one year with 360 days (12 month * 30 days per month)
 
         # add statistics to overall statistics
         statistics.append(statistic)
