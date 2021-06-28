@@ -21,20 +21,33 @@ def accumulate_dict(d):
 
 
 def print_msg(time, *args, **kwargs):
+    #return
     print(f"{time:.1f}:", *args, **kwargs)
 
 
-#class Statistics():
+
+class Usage():
+    """"""
+    def __init__(self, limit):
+        self.limit = None # maximum number of users, same for all days
+        self.count = [] # number of users, day-wise
+        self.new = [] # number of new users, day-wise
+        self.reject = [] # number of users rejected due to maximum usage, day-wise
+
+
+class Statistics():
+    def __init__(self, limit_tent_meadow, limit_caravan_lots, limit_people):
+        self.tent_meadow = Usage(limit_tent_meadow)
+        self.caravan_lots = Usage(limit_caravan_lots)
+        self.people = Usage(limit_people)
 
 
 class Camperform(Enum):
-    # just a tent, only allowed on tent meadow, does not need electricity (lower base price)
+    # just a tent, only allowed on tent meadow (needs 1 place)
     TENT = 0
-    # a tent and a car, needs electricity (higher base price)
-    # if checked in on tent meadow: car has to be parked outside
-    # if checked in on caravan lot: car parks on lot and costs extra
+    # a tent and a car, only allowed on tent meadow (needs 2 places)
     TENT_CAR = 1
-    # a caravan, only allowed on caravan lots, needs electricity (higher base price)
+    # a caravan, only allowed on caravan lots
     CARAVAN = 2
 
 
@@ -44,9 +57,9 @@ class Campsite(object):
         self.env = env
         
         # meadow where campers with tent will stay
-        self.tent_meadow = simpy.Resource(self.env, capacity=sizes.size_meadow)
-        # lots where campers with caravan will stay, usable by tents with car if tent meadow is full
-        self.caravan_lots = simpy.Resource(self.env, capacity=sizes.num_lots)
+        self.tent_meadow = simpy.Container(self.env, init=0, capacity=sizes.size_meadow)
+        # lots where campers with caravan will stay
+        self.caravan_lots = simpy.Container(self.env, init=0, capacity=sizes.num_lots)
 
         # limited number of people due to corona regulations (unlimited is possible with capacity=simpy.core.Infinity)
         self.people = simpy.Container(self.env, init=0, capacity=sizes.limit_people)
@@ -57,6 +70,8 @@ def setup(env, settings):
     and let them try to check in to the campsite."""
     # create new empty campsite
     campsite = Campsite(env, settings.sizes)
+
+    print_msg(env.now, "start simulation")
 
     # new groups arrive every day
     while True:
@@ -80,79 +95,68 @@ def setup(env, settings):
             # create new arriving campers, they try to check in on camp site
             env.process(camper(env, str(day) + '-' + str(i), campsite, forms[i], num_people[i], durations[i]))
 
+        # calculate statistics for this day
+        # TODO
+
         # proceed to next day
         yield env.timeout(1)
 
 
 def camper(env, name, campsite, form, num_people, duration):
     """Models 1 camper group defined by form, number of people and duration of stay.
-    Group tries to check in on given campsite. Prerequisites needed for successful check in: 
-        -a free place for tent depending on form of camper
-        -maximum number of people on campsite (corona regulations) not reached"""
-
-    places = []
-    if form is Camperform.TENT:
-        # tents belong to the tent meadow
-        places.append(campsite.tent_meadow)
-    elif form is Camperform.TENT_CAR:
-        # groups with tent and car belong firstly to the tent meadow, car has to park outside
-        places.append(campsite.tent_meadow)
-        # usage of caravan lot is possible if tent meadow is full, car can park on lot and has to be paid extra
-        places.append(campsite.caravan_lots)
-    elif form is Camperform.CARAVAN:
-        # caravans belong always to the caravan lots
-        places.append(campsite.caravan_lots)
-
+    Group tries to check in on given campsite. Prerequisites needed for successful check in:
+        -maximum number of people on campsite (corona regulations) not reached
+        -a free place on campsite depending on form of camper"""
 
     # check all people in, abort instantly via timeout(0) if campsite people limit (corona regulations) is reached
     check_in = campsite.people.put(num_people)
     checked_in = yield check_in | env.timeout(0)
     if check_in not in checked_in:
-        print_msg(env.now, name, f"rejected {num_people} people (limit {campsite.people.capacity} reached),",
-                f"{campsite.people.level} people on site")
+        print_msg(env.now, name, f"reject {num_people} people, limit reached ({campsite.people.level}/{campsite.people.capacity})")
+        # TODO add to statistics
     else:
-        print_msg(env.now, name, f"checked in {num_people} people, {campsite.people.level} people on site")
+        # check in successful (in terms of people limit), try to get place on campsite
+        request_place = None
+        if form is Camperform.TENT:
+            # tents need 1 place on the tent meadow
+            request_place = campsite.tent_meadow.put(1)
+        elif  form is Camperform.TENT_CAR:
+            # tents with car need 2 places on the tent meadow
+            request_place = campsite.tent_meadow.put(2)
+        elif form is Camperform.CARAVAN:
+            # caravans belong to the caravan lots and need 1 lot
+            request_place = campsite.caravan_lots.put(1)
 
+        # try to get place on campsite fitting to form of camper
+        # abort instantly if no place available via timeout(0)
+        place_available = yield request_place | env.timeout(0)
+        if request_place not in place_available:
+            # campsite is full
+            # TODO add rejection to statistics
+            print_msg(env.now, name, f"reject {form}, no place available")
+        else:
+            print_msg(env.now, name, f"check in {form}, {num_people} people, {duration} nights")
 
-        for place in places:
-            place_available = False
+            # calculate price
+            # pay
+            # add to statistics
 
-            with place.request() as get_place:
+            # occupy place on campsite during the duration of stay
+            # check out before 11:30, check in after 14:00 => remove 2.5 hours (0.1 days) time difference from duration
+            yield env.timeout(duration - 0.1)
 
-                # try to enter campsite, abort instantly if campsite is full (via timeout(0))
-                entered = yield get_place | env.timeout(0)
+            # leave place on campsite after stay
+            if form is Camperform.TENT:
+                yield campsite.tent_meadow.get(1)
+            elif  form is Camperform.TENT_CAR:
+                yield campsite.tent_meadow.get(2)
+            elif form is Camperform.CARAVAN:
+                yield campsite.caravan_lots.get(1)
 
-                # check if aborted
-                if get_place in entered:
-                    place_available = True
-
-                    print_msg(env.now, name, f"entered, {num_people} people {duration} nights, {campsite.people.level} people on site")
-
-                    # calculate price
-                    # pay
-
-                    # occupy place on campsite during the duration of stay
-                    yield env.timeout(duration)
-
-                else:
-                    # campsite is full
-                    # TODO add rejection to statistics
-                    print_msg(env.now, name, f"rejected for place {place}")
-                    pass
-
-                # leave campsite automatically via python context manager
-
-            if place_available:
-                # place is available, no further looping over other places required
-                break
-            else:
-                pass
-                print('%.1f %s rejected' % (env.now, name))
-
+            print_msg(env.now, name, f"check out")
 
         # check people out
         yield campsite.people.get(num_people)
-        print_msg(env.now, name, f"checked out {num_people} people, {campsite.people.level} people on site")
 
 
 
@@ -196,17 +200,17 @@ class Costs(object):
     # daily costs per person (e. g. electricity, water)
     person = -2
     # daily fixed costs (e. g. land tax, wages)
-    daily = -350
+    daily = -200
 
 
 class Sizes(object):
     # number of places of tent meadow
-    size_meadow = 2#30
+    size_meadow = 4#30
     # number of lots for caravans
-    num_lots = 2#50
+    num_lots = 21#50
 
     # limited number of people for whole campsite due to corona regulations
-    limit_people = 7#simpy.core.Infinity # infinity = no limit
+    limit_people = 10#simpy.core.Infinity # infinity = no limit
 
 
 class Settings(object):
@@ -217,13 +221,14 @@ class Settings(object):
     costs = Costs
     sizes = Sizes
 
+    # general simulation settings
+    # make simulation reproducible if not None
+    seed = 42
+    # number of repetitions of simulation, results are averaged over all experiments
+    num_experiments = 25
+
 
 if __name__ == '__main__':
-
-    # make simulation reproducible if not None
-    random.seed(42)
-
-    num_experiments = 1
 
     # calculate multiplicator for each day of year (360 days = 12 month * 30 days per month)
     Settings.groups.year = [normal_dist(day / 30, Settings.groups.year_mean, Settings.groups.year_sd, 1) for day in range(12 * 30)]
@@ -233,15 +238,19 @@ if __name__ == '__main__':
     Settings.campers.duration_val, Settings.campers.duration_wght = accumulate_dict(Settings.campers.duration)
     Settings.campers.people_val, Settings.campers.people_wght = accumulate_dict(Settings.campers.people)
 
-    # check out before 11:30, check in after 14:00,  => remove 2,5h time difference from duration
-    Settings.campers.duration_val = [duration - 0.1 for duration in Settings.campers.duration_val]
+    random.seed(Settings.seed)
 
-    for i in range(num_experiments):
+    statistics = []
+
+    for _ in range(Settings.num_experiments):
+        statistic = Statistics(Settings.sizes.size_meadow, Settings.sizes.num_lots, Settings.sizes.limit_people)
+
         env = simpy.Environment()
         startup = env.process(setup(env, Settings))
 
-        env.run(until=23) # simulate one year with 360 days (12 month * 30 days per month)
+        env.run(until=30) # simulate one year with 360 days (12 month * 30 days per month)
 
         # add statistics to overall statistics
+        statistics.append(statistic)
 
     # calculate mean and stdev of results over all experiments
