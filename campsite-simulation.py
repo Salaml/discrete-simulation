@@ -1,7 +1,8 @@
-import simpy
 import random
 from math import exp, sqrt, pi
 from enum import Enum
+import simpy
+import matplotlib.pyplot as plt
 
 
 def normal_dist(x , mean , sd, scale=None):
@@ -21,8 +22,117 @@ def accumulate_dict(d):
 
 
 def print_msg(time, *args, **kwargs):
-    #return
+    return
     print(f"{time:.1f}:", *args, **kwargs)
+
+
+def plot_parameter(settings):
+    plt.figure(figsize=(8,8))
+    plt.suptitle('Parameter Simulation Campingplatz', weight='bold')
+
+    plt.subplot(321, title='Verteilung neue Campergruppen pro Tag', xlabel='Anzahl Gruppen')
+    day_x_min = max(0, settings.groups.day_mean - 4 * settings.groups.day_sd)
+    day_x_max = settings.groups.day_mean + 4 * settings.groups.day_sd
+    day_x = [(day_x_max - day_x_min) * x / 100 for x in range(100)]
+    day_y = [normal_dist(x, settings.groups.year_mean, settings.groups.year_sd) for x in day_x]
+    plt.plot(day_x, day_y)
+
+    fig = plt.subplot(322, title='Multiplikator Nachfrage Jahresverlauf', xlabel='Monat')
+    year_x = [12 * x / len(settings.groups.year) for x in range(len(settings.groups.year))]
+    plt.plot(year_x, settings.groups.year)
+    fig.set_xticks(list(range(1,13)))
+
+    plt.subplot(323, title='Verteilung Campertypen')
+    plt.bar(('Zelt', 'Zelt+PKW', 'Wohnwagen\n/-mobil'), settings.campers.form.values())
+
+    plt.subplot(324, title='Preise Campertypen')
+    prices_y = list(settings.prices.form.values())
+    prices_y.append(settings.prices.person)
+    plt.bar(('Zelt', 'Zelt+PKW', 'Wohnwagen\n/-mobil', 'Person'), prices_y)
+
+    fig = plt.subplot(325, title='Verteilung Aufenthaltsdauer', xlabel='Anzahl Nächte')
+    plt.bar(settings.campers.duration.keys(), settings.campers.duration.values())
+    fig.set_xticks(list(settings.campers.duration.keys()))
+
+    fig = plt.subplot(326, title='Verteilung Personen pro Gruppe', xlabel='Anzahl Personen')
+    plt.bar(settings.campers.people.keys(), settings.campers.people.values())
+    fig.set_xticks(list(settings.campers.people.keys()))
+
+    plt.tight_layout()
+
+
+def plot_usage(statistics):
+    plt.figure(figsize=(10,9))
+    plt.suptitle('Auslastung Campingplatz', weight='bold')
+
+    fig = plt.subplot(321, title='Anzahl Gäste', xlabel='Monat')
+    count_x = [12 * x / len(statistics.people.count) for x in range(len(statistics.people.count))]
+    plt.plot(count_x, statistics.people.count, linestyle='', marker='.')
+    if statistics.people.limit != simpy.core.Infinity:
+        plt.axhline(statistics.people.limit, color='red', linestyle='--', label='Limit')
+        plt.legend()
+    fig.set_xticks(list(range(1,13)))
+
+    fig = plt.subplot(322, title='neue Gäste', xlabel='Monat')
+    new_x = [12 * x / len(statistics.people.new) for x in range(len(statistics.people.new))]
+    plt.plot(new_x, statistics.people.new, linestyle='', marker='.', label='gesamt')
+    reject_x = [12 * x / len(statistics.people.reject) for x in range(len(statistics.people.reject))]
+    plt.plot(reject_x, statistics.people.reject, linestyle='', marker='.', label='abgelehnt')
+    fig.set_xticks(list(range(1,13)))
+    plt.legend()
+
+    fig = plt.subplot(323, title='genutze Plätze Zeltwiese', xlabel='Monat')
+    count_x = [12 * x / len(statistics.tent_meadow.count) for x in range(len(statistics.tent_meadow.count))]
+    plt.plot(count_x, statistics.tent_meadow.count, linestyle='', marker='.')
+    if statistics.tent_meadow.limit != simpy.core.Infinity:
+        plt.axhline(statistics.tent_meadow.limit, color='red', linestyle='--', label='Limit')
+        plt.legend()
+    fig.set_xticks(list(range(1,13)))
+
+    fig = plt.subplot(324, title='neue Gruppen Zeltwiese', xlabel='Monat')
+    new_x = [12 * x / len(statistics.tent_meadow.new) for x in range(len(statistics.tent_meadow.new))]
+    plt.plot(new_x, statistics.tent_meadow.new, linestyle='', marker='.', label='gesamt')
+    reject_x = [12 * x / len(statistics.tent_meadow.reject) for x in range(len(statistics.tent_meadow.reject))]
+    plt.plot(reject_x, statistics.tent_meadow.reject, linestyle='', marker='.', label='abgelehnt')
+    fig.set_xticks(list(range(1,13)))
+    plt.legend()
+
+    fig = plt.subplot(325, title='genutze Parzellen Caravan', xlabel='Monat')
+    count_x = [12 * x / len(statistics.caravan_lots.count) for x in range(len(statistics.caravan_lots.count))]
+    plt.plot(count_x, statistics.caravan_lots.count, linestyle='', marker='.')
+    if statistics.caravan_lots.limit != simpy.core.Infinity:
+        plt.axhline(statistics.caravan_lots.limit, color='red', linestyle='--', label='Limit')
+        plt.legend()
+    fig.set_xticks(list(range(1,13)))
+
+    fig = plt.subplot(326, title='neue Gruppen Caravan', xlabel='Monat')
+    new_x = [12 * x / len(statistics.caravan_lots.new) for x in range(len(statistics.caravan_lots.new))]
+    plt.plot(new_x, statistics.caravan_lots.new, linestyle='', marker='.', label='gesamt')
+    reject_x = [12 * x / len(statistics.caravan_lots.reject) for x in range(len(statistics.caravan_lots.reject))]
+    plt.plot(reject_x, statistics.caravan_lots.reject, linestyle='', marker='.', label='abgelehnt')
+    fig.set_xticks(list(range(1,13)))
+
+    plt.tight_layout()
+
+
+def plot_financial(statistics):
+    plt.figure(figsize=(10,9))
+    plt.suptitle(f"Finanzen Campingplatz, Gesamtbilanz = {round(sum(statistics.balance))}", weight='bold')
+
+    earnings_person_x = [12 * x / len(statistics.earnings_person) for x in range(len(statistics.earnings_person))]
+    plt.plot(earnings_person_x, statistics.earnings_person, linestyle='', marker='.', label='Einnahmen Personen')
+    earnings_base_x = [12 * x / len(statistics.earnings_base) for x in range(len(statistics.earnings_base))]
+    plt.plot(earnings_base_x, statistics.earnings_base, linestyle='', marker='.', label='Einnahmen Grundpreis')
+    costs_person_x = [12 * x / len(statistics.costs_person) for x in range(len(statistics.costs_person))]
+    plt.plot(costs_person_x, statistics.costs_person, linestyle='', marker='.', label='Selbstkosten')
+    costs_base_x = [12 * x / len(statistics.costs_base) for x in range(len(statistics.costs_base))]
+    plt.plot(costs_base_x, statistics.costs_base, linestyle='', marker='.', label='Gemeinkosten')
+    balance_x = [12 * x / len(statistics.balance) for x in range(len(statistics.balance))]
+    fig = plt.plot(balance_x, statistics.balance, linestyle='', marker='.', label='Bilanz')
+    #fig.set_xticks(list(range(1,13)))
+    plt.legend()
+
+    plt.tight_layout()
 
 
 class Usage():
@@ -48,8 +158,10 @@ class Statistics():
         self.earnings_person = [] # earnings depending on number people, day-wise
         self.earnings_base = [] # earnings by base price depending on camper form, day-wise
 
-        self.costs_person = [] # costs depending on number of people (water, ...), day-wise
-        self.costs_base = [] # daily fixed costs (wages, ...), 
+        self.costs_person = [] # costs depending on number of people (water, ...), costs are negative values, day-wise
+        self.costs_base = [] # daily fixed costs (wages, ...), costs are negative values, day-wise
+
+        self.balance = [] # earnings + costs
 
     def add_empty_day(self):
         self.tent_meadow.add_empty_day()
@@ -88,6 +200,9 @@ class Statistics():
         self.costs_person[-1] += costs_person
         self.costs_base[-1] += costs_base
 
+    def calc_balance(self):
+        self.balance = [sum(x) for x in zip(self.earnings_person, self.earnings_base, self.costs_person, self.costs_base)]
+
     @staticmethod
     def average_list(list_statistics, averaged):
         """averages all properties of list of Statistics objects into single Statistics object"""
@@ -108,7 +223,6 @@ class Statistics():
         
         averaged.costs_person = [sum(x) / len(x) for x in zip(*[stat.costs_person for stat in list_statistics])]
         averaged.costs_base = [sum(x) / len(x) for x in zip(*[stat.costs_base for stat in list_statistics])]
-
 
 
 class Camperform(Enum):
@@ -288,17 +402,17 @@ class Costs(object):
     # daily costs per person (e. g. electricity, water)
     person = -2
     # daily fixed costs (e. g. land tax, wages)
-    base = -200
+    base = -350
 
 
 class Sizes(object):
     # number of places of tent meadow
-    size_meadow = 4#30
+    size_meadow = 50
     # number of lots for caravans
-    num_lots = 21#50
+    num_lots = 30
 
     # limited number of people for whole campsite due to corona regulations
-    limit_people = 10#simpy.core.Infinity # infinity = no limit
+    limit_people = 150 # no limit with simpy.core.Infinity
 
 
 class Settings(object):
@@ -313,7 +427,7 @@ class Settings(object):
     # make simulation reproducible if not None
     seed = 42
     # number of repetitions of simulation, results are averaged over all experiments
-    num_experiments = 1
+    num_experiments = 25
 
 
 if __name__ == '__main__':
@@ -345,4 +459,11 @@ if __name__ == '__main__':
     statistic_mean = Statistics(Settings.sizes.size_meadow, Settings.sizes.num_lots, Settings.sizes.limit_people)
     Statistics.average_list(statistics, statistic_mean)
 
-    # show diagrams
+    # calculate financial balance
+    statistic_mean.calc_balance()
+
+    # show everything in pretty format
+    plot_parameter(Settings)
+    plot_usage(statistic_mean)
+    plot_financial(statistic_mean)
+    plt.show()
