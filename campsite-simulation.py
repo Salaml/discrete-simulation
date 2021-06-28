@@ -33,6 +33,11 @@ class Usage():
         self.new = [] # number of new users, day-wise
         self.reject = [] # number of users rejected due to maximum usage, day-wise
 
+    def add_empty_day(self):
+        self.count.append(0)
+        self.new.append(0)
+        self.reject.append(0)
+
 
 class Statistics():
     def __init__(self, limit_tent_meadow, limit_caravan_lots, limit_people):
@@ -46,6 +51,65 @@ class Statistics():
         self.costs_person = [] # costs depending on number of people (water, ...), day-wise
         self.costs_base = [] # daily fixed costs (wages, ...), 
 
+    def add_empty_day(self):
+        self.tent_meadow.add_empty_day()
+        self.caravan_lots.add_empty_day()
+        self.people.add_empty_day()
+
+        self.earnings_person.append(0)
+        self.earnings_base.append(0)
+
+        self.costs_person.append(0)
+        self.costs_base.append(0)
+
+    def add_usage(self, form, count=0, new=0, reject=0):
+        target = None
+        if form is None:
+            target = self.people
+        elif form is Camperform.TENT:
+            target = self.tent_meadow
+        elif form is Camperform.TENT_CAR:
+            target = self.tent_meadow
+            # tent with car takes twice the space of a single tent
+            count *= 2
+            new *= 2
+            reject *= 2
+        elif form is Camperform.CARAVAN:
+            target = self.caravan_lots
+
+        target.count[-1] += count
+        target.new[-1] += new
+        target.reject[-1] += reject
+
+    def add_financial(self, earnings_person=0, earnings_base=0, costs_person=0, costs_base=0):
+        self.earnings_person[-1] += earnings_person
+        self.earnings_base[-1] += earnings_base
+
+        self.costs_person[-1] += costs_person
+        self.costs_base[-1] += costs_base
+
+    @staticmethod
+    def average_list(list_statistics, averaged):
+        """averages all properties of list of Statistics objects into single Statistics object"""
+        averaged.tent_meadow.count = [sum(x) / len(x) for x in zip(*[stat.tent_meadow.count for stat in list_statistics])]
+        averaged.tent_meadow.new = [sum(x) / len(x) for x in zip(*[stat.tent_meadow.new for stat in list_statistics])]
+        averaged.tent_meadow.reject = [sum(x) / len(x) for x in zip(*[stat.tent_meadow.reject for stat in list_statistics])]
+        
+        averaged.caravan_lots.count = [sum(x) / len(x) for x in zip(*[stat.caravan_lots.count for stat in list_statistics])]
+        averaged.caravan_lots.new = [sum(x) / len(x) for x in zip(*[stat.caravan_lots.new for stat in list_statistics])]
+        averaged.caravan_lots.reject = [sum(x) / len(x) for x in zip(*[stat.caravan_lots.reject for stat in list_statistics])]
+        
+        averaged.people.count = [sum(x) / len(x) for x in zip(*[stat.people.count for stat in list_statistics])]
+        averaged.people.new = [sum(x) / len(x) for x in zip(*[stat.people.new for stat in list_statistics])]
+        averaged.people.reject = [sum(x) / len(x) for x in zip(*[stat.people.reject for stat in list_statistics])]
+        
+        averaged.earnings_person = [sum(x) / len(x) for x in zip(*[stat.earnings_person for stat in list_statistics])]
+        averaged.earnings_base = [sum(x) / len(x) for x in zip(*[stat.earnings_base for stat in list_statistics])]
+        
+        averaged.costs_person = [sum(x) / len(x) for x in zip(*[stat.costs_person for stat in list_statistics])]
+        averaged.costs_base = [sum(x) / len(x) for x in zip(*[stat.costs_base for stat in list_statistics])]
+
+
 
 class Camperform(Enum):
     # just a tent, only allowed on tent meadow (needs 1 place)
@@ -57,7 +121,7 @@ class Camperform(Enum):
 
 
 class Campsite(object):
-    def __init__(self, env, sizes):
+    def __init__(self, env, prices, costs, sizes):
         # simulation environment
         self.env = env
         
@@ -69,21 +133,25 @@ class Campsite(object):
         # limited number of people due to corona regulations (unlimited is possible with capacity=simpy.core.Infinity)
         self.people = simpy.Container(self.env, init=0, capacity=sizes.limit_people)
 
+        # daily prices and costs
+        self.prices = prices
+        self.costs = costs
+
 
 def setup(env, settings, statistics):
     """Creates a campsite. Creates new arriving groups on every new day
     and let them try to check in to the campsite."""
     # create new empty campsite
-    campsite = Campsite(env, settings.sizes)
+    campsite = Campsite(env, settings.prices, settings.costs, settings.sizes)
 
     print_msg(env.now, "start simulation")
 
     # new groups arrive every day
     while True:
-        day = env.now % 360
+        day = round(env.now % 360)
 
         # prepare statistics for this day
-        
+        statistics.add_empty_day()
 
         # choose random number of new groups for this day, independent of day in year
         num_groups = random.normalvariate(settings.groups.day_mean, settings.groups.day_sd)
@@ -103,8 +171,20 @@ def setup(env, settings, statistics):
             # create new arriving campers, they try to check in on camp site
             env.process(camper(env, str(day) + '-' + str(i), campsite, forms[i], num_people[i], durations[i], statistics))
 
+        # wait until all campers have checked in / were rejected
+        yield env.timeout(0.1)
+
+        # gather statistics
+        statistics.add_usage(None, count=campsite.people.level)
+        statistics.add_usage(Camperform.TENT, count=campsite.tent_meadow.level)
+        statistics.add_usage(Camperform.CARAVAN, count=campsite.caravan_lots.level)
+
+        cost_people = campsite.costs.person * campsite.people.level
+        costs_base = campsite.costs.base
+        statistics.add_financial(costs_person=cost_people, costs_base=costs_base)
+
         # proceed to next day
-        yield env.timeout(1)
+        yield env.timeout(0.9)
 
 
 def camper(env, name, campsite, form, num_people, duration, statistics):
@@ -120,7 +200,8 @@ def camper(env, name, campsite, form, num_people, duration, statistics):
         # check in not successful, group goes to another campsite -> cancel pending request
         check_in.cancel()
         print_msg(env.now, name, f"reject {num_people} people, limit reached ({campsite.people.level}/{campsite.people.capacity})")
-        # TODO add to statistics
+        # add to statistics
+        statistics.add_usage(None, reject=num_people)
     else:
         # check in successful (in terms of people limit), try to get place on campsite
         request_place = None
@@ -140,14 +221,20 @@ def camper(env, name, campsite, form, num_people, duration, statistics):
         if request_place not in place_available:
             # campsite is full, group goes to another campsite -> cancel pending request
             request_place.cancel()
-            # TODO add rejection to statistics
             print_msg(env.now, name, f"reject {form}, no place available")
+            # add rejection to statistics
+            statistics.add_usage(form, reject=num_people)
         else:
             print_msg(env.now, name, f"check in {form}, {num_people} people, {duration} nights")
 
-            # calculate price
-            # pay
+            # calculate price to pay
+            price_people = campsite.prices.person * num_people * duration
+            price_base = campsite.prices.form[form] * duration
+
             # add to statistics
+            statistics.add_financial(earnings_person=price_people, earnings_base=price_base)
+            statistics.add_usage(form, new=1) # for tent meadow / caravan lots
+            statistics.add_usage(None, new=num_people) # for people limit
 
             # occupy place on campsite during the duration of stay
             # check out before 11:30, check in after 14:00 => remove 2.5 hours (0.1 days) time difference from duration
@@ -161,16 +248,10 @@ def camper(env, name, campsite, form, num_people, duration, statistics):
             elif form is Camperform.CARAVAN:
                 yield campsite.caravan_lots.get(1)
 
-            print_msg(env.now, name, f"check out")
+            print_msg(env.now, name, "check out")
 
         # check people out
         yield campsite.people.get(num_people)
-
-
-def print_stats(res):
-    print(f'{res.count} of {res.capacity} slots are allocated.')
-    print(f'  Users: {res.users}')
-    print(f'  Queued events: {res.queue}')
 
 
 class DistGroups(object):
@@ -260,6 +341,8 @@ if __name__ == '__main__':
         # add statistics to overall statistics
         statistics.append(statistic)
 
-    # calculate mean and stdev of results over all experiments
+    # calculate mean of results over all experiments
     statistic_mean = Statistics(Settings.sizes.size_meadow, Settings.sizes.num_lots, Settings.sizes.limit_people)
-    # TODO
+    Statistics.average_list(statistics, statistic_mean)
+
+    # show diagrams
