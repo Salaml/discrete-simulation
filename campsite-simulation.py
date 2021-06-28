@@ -25,11 +25,10 @@ def print_msg(time, *args, **kwargs):
     print(f"{time:.1f}:", *args, **kwargs)
 
 
-
 class Usage():
     """"""
     def __init__(self, limit):
-        self.limit = None # maximum number of users, same for all days
+        self.limit = limit # maximum number of users, same for all days
         self.count = [] # number of users, day-wise
         self.new = [] # number of new users, day-wise
         self.reject = [] # number of users rejected due to maximum usage, day-wise
@@ -40,6 +39,12 @@ class Statistics():
         self.tent_meadow = Usage(limit_tent_meadow)
         self.caravan_lots = Usage(limit_caravan_lots)
         self.people = Usage(limit_people)
+
+        self.earnings_person = [] # earnings depending on number people, day-wise
+        self.earnings_base = [] # earnings by base price depending on camper form, day-wise
+
+        self.costs_person = [] # costs depending on number of people (water, ...), day-wise
+        self.costs_base = [] # daily fixed costs (wages, ...), 
 
 
 class Camperform(Enum):
@@ -65,7 +70,7 @@ class Campsite(object):
         self.people = simpy.Container(self.env, init=0, capacity=sizes.limit_people)
 
 
-def setup(env, settings):
+def setup(env, settings, statistics):
     """Creates a campsite. Creates new arriving groups on every new day
     and let them try to check in to the campsite."""
     # create new empty campsite
@@ -73,9 +78,14 @@ def setup(env, settings):
 
     print_msg(env.now, "start simulation")
 
+    camper_list = []
+
     # new groups arrive every day
     while True:
         day = env.now % 360
+
+        # prepare statistics for this day
+        
 
         # choose random number of new groups for this day, independent of day in year
         num_groups = random.normalvariate(settings.groups.day_mean, settings.groups.day_sd)
@@ -93,16 +103,15 @@ def setup(env, settings):
 
         for i in range(num_groups):
             # create new arriving campers, they try to check in on camp site
-            env.process(camper(env, str(day) + '-' + str(i), campsite, forms[i], num_people[i], durations[i]))
-
-        # calculate statistics for this day
-        # TODO
+            new_camper = env.process(camper(env, str(day) + '-' + str(i), campsite, 
+                    forms[i:i+1][0], num_people[i:i+1][0], durations[i:i+1][0], statistics))
+            camper_list.append(new_camper)
 
         # proceed to next day
         yield env.timeout(1)
 
 
-def camper(env, name, campsite, form, num_people, duration):
+def camper(env, name, campsite, form, num_people, duration, statistics):
     """Models 1 camper group defined by form, number of people and duration of stay.
     Group tries to check in on given campsite. Prerequisites needed for successful check in:
         -maximum number of people on campsite (corona regulations) not reached
@@ -135,7 +144,7 @@ def camper(env, name, campsite, form, num_people, duration):
             # TODO add rejection to statistics
             print_msg(env.now, name, f"reject {form}, no place available")
         else:
-            print_msg(env.now, name, f"check in {form}, {num_people} people, {duration} nights")
+            print_msg(env.now, name, f"check in {form}, {num_people} people, {duration} nights ({campsite.people.level}/{campsite.people.capacity})")
 
             # calculate price
             # pay
@@ -153,10 +162,11 @@ def camper(env, name, campsite, form, num_people, duration):
             elif form is Camperform.CARAVAN:
                 yield campsite.caravan_lots.get(1)
 
-            print_msg(env.now, name, f"check out")
+            print_msg(env.now, name, f"check out ({campsite.people.level}/{campsite.people.capacity})")
 
         # check people out
         yield campsite.people.get(num_people)
+        print_msg(env.now, name, f"check out ({campsite.people.level}/{campsite.people.capacity})")
 
 
 
@@ -200,7 +210,7 @@ class Costs(object):
     # daily costs per person (e. g. electricity, water)
     person = -2
     # daily fixed costs (e. g. land tax, wages)
-    daily = -200
+    base = -200
 
 
 class Sizes(object):
@@ -225,7 +235,7 @@ class Settings(object):
     # make simulation reproducible if not None
     seed = 42
     # number of repetitions of simulation, results are averaged over all experiments
-    num_experiments = 25
+    num_experiments = 1
 
 
 if __name__ == '__main__':
@@ -240,13 +250,13 @@ if __name__ == '__main__':
 
     random.seed(Settings.seed)
 
-    statistics = []
+    statistics = [] # list of statistics with one entry per experiment
 
     for _ in range(Settings.num_experiments):
         statistic = Statistics(Settings.sizes.size_meadow, Settings.sizes.num_lots, Settings.sizes.limit_people)
 
         env = simpy.Environment()
-        startup = env.process(setup(env, Settings))
+        startup = env.process(setup(env, Settings, statistic))
 
         env.run(until=30) # simulate one year with 360 days (12 month * 30 days per month)
 
@@ -254,3 +264,5 @@ if __name__ == '__main__':
         statistics.append(statistic)
 
     # calculate mean and stdev of results over all experiments
+    statistic_mean = Statistics(Settings.sizes.size_meadow, Settings.sizes.num_lots, Settings.sizes.limit_people)
+    # TODO
