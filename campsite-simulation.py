@@ -117,7 +117,10 @@ def plot_usage(statistics):
 
 def plot_financial(statistics):
     plt.figure(figsize=(10,9))
-    plt.suptitle(f"Finanzen Campingplatz, Gesamtbilanz = {round(sum(statistics.balance))}", weight='bold')
+    balance_total = round(sum(statistics.balance))
+    balance_mean = round(balance_total / len(statistics.balance))
+    title = f"Finanzen Campingplatz, Gesamtbilanz = {balance_total}, Schnitt Bilanz pro Tag = {balance_mean}"
+    plt.suptitle(title, weight='bold')
 
     earnings_person_x = [12 * x / len(statistics.earnings_person) for x in range(len(statistics.earnings_person))]
     plt.plot(earnings_person_x, statistics.earnings_person, linestyle='', marker='.', label='Einnahmen Personen')
@@ -368,6 +371,10 @@ def camper(env, name, campsite, form, num_people, duration, statistics):
         yield campsite.people.get(num_people)
 
 
+################################################################################
+################################### Settings ###################################
+################################################################################
+
 class DistGroups(object):
     # parameters for normal distribution of number of new camper groups per day
     day_mean = 12
@@ -377,7 +384,7 @@ class DistGroups(object):
     # normal distribution with maximum at mean scaled to 1
     # (0 = begin of january, 11 = begin of december)
     year_mean = 7.0 # maximum at end of july / begin of august
-    year_sd = 2.5
+    year_sd = 2.0
 
 
 class DistCampers(object):
@@ -429,6 +436,9 @@ class Settings(object):
     # number of repetitions of simulation, results are averaged over all experiments
     num_experiments = 25
 
+################################################################################
+################################################################################
+################################################################################
 
 if __name__ == '__main__':
 
